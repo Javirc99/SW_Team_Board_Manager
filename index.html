@@ -68,6 +68,7 @@
                 const updatedStates = BOARD_DEFS.map(def => {
                     const existing = currentStates.find(b => b.id === def.id);
                     if (!existing) return { ...def, locked: false, inMaintenance: false, note: '' };
+                    
                     if (existing.locked && existing.lockedAt) {
                         const hoursElapsed = (now - new Date(existing.lockedAt).getTime()) / (1000 * 60 * 60);
                         if (hoursElapsed >= autoReleaseHours) return { ...def, locked: false, lockedBy: null, lockedAt: null, inMaintenance: false, note: '' };
@@ -84,23 +85,9 @@
                 return () => clearInterval(interval);
             }, [autoReleaseHours]);
 
-            const toggleTheme = () => {
-                const nextTheme = !isDark;
-                setIsDark(nextTheme);
-                localStorage.setItem('user_theme', nextTheme ? 'dark' : 'light');
-            };
-
             const updateStorage = (newBoards) => {
                 setBoards(newBoards);
                 localStorage.setItem('shared_board-states', JSON.stringify(newBoards));
-            };
-
-            const toggleLock = (id) => {
-                if (!userName) { setShowLogin(true); return; }
-                updateStorage(boards.map(b => b.id === id ? (
-                    b.locked && b.lockedBy !== userName ? (alert(`Locked by ${b.lockedBy}`), b) :
-                    { ...b, locked: !b.locked, lockedBy: !b.locked ? userName : null, lockedAt: !b.locked ? new Date().toISOString() : null }
-                ) : b));
             };
 
             const containerClass = isDark 
@@ -131,7 +118,7 @@
                             </div>
                             <div className="flex flex-col items-end gap-2">
                                 <div className="flex items-center gap-2">
-                                    <button onClick={toggleTheme} className={`p-2 rounded-lg ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
+                                    <button onClick={() => {setIsDark(!isDark); localStorage.setItem('user_theme', !isDark ? 'dark' : 'light');}} className={`p-2 rounded-lg ${isDark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
                                         <SunMoon isDark={isDark} />
                                     </button>
                                     {userName === 'admin' && (
@@ -146,8 +133,13 @@
                                 </div>
                                 <div className={`text-[10px] uppercase font-bold flex gap-2 ${isDark ? 'text-blue-200/50' : 'text-slate-500'}`}>
                                     Auto-Release: 
-                                    <select value={autoReleaseHours} onChange={(e) => { setAutoReleaseHours(Number(e.target.value)); localStorage.setItem('user_auto-release-cfg', e.target.value); }} className="bg-transparent outline-none">
-                                        <option value="4">4h</option><option value="8">8h</option><option value="12">12h</option>
+                                    <select value={autoReleaseHours} onChange={(e) => { setAutoReleaseHours(Number(e.target.value)); localStorage.setItem('user_auto-release-cfg', e.target.value); }} className="bg-transparent outline-none cursor-pointer">
+                                        <option value="0.5">30 min</option>
+                                        <option value="1">1 hour</option>
+                                        <option value="2">2 hours</option>
+                                        <option value="4">4 hours</option>
+                                        <option value="8">8 hours</option>
+                                        <option value="12">12 hours</option>
                                     </select>
                                 </div>
                             </div>
@@ -168,11 +160,21 @@
                                         {board.inMaintenance ? <Wrench className="text-orange-500" /> : board.locked ? <Lock className="text-red-500"/> : <Unlock className="text-green-500"/>}
                                     </div>
                                     <div className="mb-6 h-14 flex flex-col justify-center">
-                                        {board.inMaintenance ? <div className="text-orange-500 text-xs italic truncate font-medium">"{board.note}"</div> : board.locked ? <div className={textMain}><div className="flex items-center gap-2 text-sm font-medium"><User size={14}/> {board.lockedBy}</div><div className={`text-[10px] uppercase ml-6 ${isDark ? 'text-blue-200/60' : 'text-slate-500'}`}>{new Date(board.lockedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div> : <span className="text-green-600 text-sm font-bold tracking-wide">Available</span>}
+                                        {board.inMaintenance ? <div className="text-orange-500 text-xs italic truncate font-bold">"{board.note}"</div> : board.locked ? <div className={textMain}><div className="flex items-center gap-2 text-sm font-medium"><User size={14}/> {board.lockedBy}</div><div className={`text-[10px] uppercase ml-6 ${isDark ? 'text-blue-200/60' : 'text-slate-500'}`}>{new Date(board.lockedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div> : <span className="text-green-600 text-sm font-bold tracking-wide">● Available</span>}
                                     </div>
                                     <div className="space-y-3">
-                                        <button disabled={board.inMaintenance || (board.locked && board.lockedBy !== userName)} onClick={() => toggleLock(board.id)} className={`w-full py-3 rounded-lg font-bold text-white transition-all shadow-md ${board.inMaintenance ? 'bg-slate-400 cursor-not-allowed' : board.locked ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>{board.locked ? 'Release Lock' : 'Lock Board'}</button>
-                                        <button onClick={() => { if(board.inMaintenance) { updateStorage(boards.map(b => b.id === board.id ? {...b, inMaintenance: false, note: ''} : b)); } else { const note = prompt("Maintenance Reason:"); if(note !== null) updateStorage(boards.map(b => b.id === board.id ? {...b, inMaintenance: true, note: note, locked: false, lockedBy: null} : b)); } }} className={`w-full py-1 text-[10px] uppercase font-bold transition-colors ${isDark ? 'text-white/30 hover:text-white' : 'text-slate-400 hover:text-slate-700'}`}>{board.inMaintenance ? 'End Maintenance' : 'Set Maintenance'}</button>
+                                        <button disabled={board.inMaintenance || (board.locked && board.lockedBy !== userName)} onClick={() => {
+                                            if (!userName) { setShowLogin(true); return; }
+                                            updateStorage(boards.map(b => b.id === board.id ? (b.locked && b.lockedBy !== userName ? (alert(`Locked by ${b.lockedBy}`), b) : { ...b, locked: !b.locked, lockedBy: !b.locked ? userName : null, lockedAt: !b.locked ? new Date().toISOString() : null }) : b));
+                                        }} className={`w-full py-3 rounded-lg font-bold text-white transition-all shadow-md ${board.inMaintenance ? 'bg-slate-400 cursor-not-allowed' : board.locked ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>{board.locked ? 'Release Lock' : 'Lock Board'}</button>
+                                        
+                                        <button onClick={() => { if(board.inMaintenance) { updateStorage(boards.map(b => b.id === board.id ? {...b, inMaintenance: false, note: ''} : b)); } else { const note = prompt("Maintenance Reason:"); if(note !== null) updateStorage(boards.map(b => b.id === board.id ? {...b, inMaintenance: true, note: note, locked: false, lockedBy: null} : b)); } }} className={`w-full py-2 text-[10px] uppercase font-black tracking-widest border rounded-lg transition-all ${
+                                            board.inMaintenance 
+                                            ? 'bg-orange-500/20 border-orange-500 text-orange-500 hover:bg-orange-500/30' 
+                                            : isDark ? 'border-white/10 text-white/40 hover:text-white hover:bg-white/5' : 'border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+                                        }`}>
+                                            {board.inMaintenance ? 'End Maintenance' : 'Set Maintenance'}
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -182,13 +184,13 @@
                         <div className={`${cardBase} backdrop-blur-lg rounded-xl p-8 border`}>
                             <h2 className={`text-xl font-bold mb-4 flex items-center gap-2 ${textMain}`}><span className="bg-blue-500 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white">?</span>How to Use</h2>
                             <div className={`grid md:grid-cols-2 gap-8 text-sm ${isDark ? 'text-blue-100/70' : 'text-slate-600'}`}>
-                                <ul className="space-y-3"><li>• 01. Select your <strong>Team Member Name</strong> to start.</li><li>• 02. Click <strong>Lock Board</strong> to claim a resource.</li></ul>
-                                <ul className="space-y-3"><li>• 03. Use <strong>Maintenance Mode</strong> for updates.</li><li>• 04. System auto-refreshes every 30 seconds.</li></ul>
+                                <ul className="space-y-3"><li>• 01. Select your <strong>Team Member Name</strong> to interact.</li><li>• 02. Click <strong>Lock Board</strong> to claim a resource.</li></ul>
+                                <ul className="space-y-3"><li>• 03. Use <strong>Maintenance Mode</strong> for physical hardware changes.</li><li>• 04. System auto-refreshes every 30 seconds for team sync.</li></ul>
                             </div>
                         </div>
                     </div>
 
-                    {/* Admin/Settings Overlay */}
+                    {/* Admin Overlay */}
                     {showAdmin && (
                         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center z-[60] p-6 text-slate-900">
                             <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">

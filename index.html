@@ -15,72 +15,64 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         
-        // Icons
-        const Lock = ({ size = 20, className = "" }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
-        );
-        const Unlock = ({ size = 20, className = "" }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
-            </svg>
-        );
-        const Wrench = ({ size = 20, className = "" }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-            </svg>
-        );
-        const User = ({ size = 18, className = "" }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-        );
+        // 1. USER REGISTRY (WHITELIST) - Edit this list to add team members
+        const VALID_USERS = ["fjroman", "admin", "javier", "engineer1", "m.garcia", "l.smith"];
+
+        const BOARD_DEFS = [
+            { id: 'zcu102-1', name: 'ZCU Board 1# Master', type: 'ZCU102' },
+            { id: 'zcu102-2', name: 'ZCU Board #2 Slave', type: 'ZCU102' },
+            { id: 'te0818-1', name: 'TE0818 Board #1', type: 'TE0818' }
+        ];
 
         const BoardManager = () => {
             const [boards, setBoards] = useState([]);
             const [userName, setUserName] = useState('');
-            const [showNameDialog, setShowNameDialog] = useState(false);
-            const [loading, setLoading] = useState(true);
-            const [logo, setLogo] = useState(null);
-            const fileInputRef = useRef(null);
+            const [showLogin, setShowLogin] = useState(false);
+            const [autoReleaseHours, setAutoReleaseHours] = useState(8); 
+            const [lastUpdated, setLastUpdated] = useState(new Date());
 
-            // UPDATED DEFINITIONS WITH MASTER/SLAVE
-            const boardDefinitions = [
-                { id: 'zcu102-1', name: 'ZCU Board 1# Master', type: 'ZCU102' },
-                { id: 'zcu102-2', name: 'ZCU Board #2 Slave', type: 'ZCU102' },
-                { id: 'te0818-1', name: 'TE0818 Board #1', type: 'TE0818' }
-            ];
-
-            useEffect(() => {
-                const savedName = localStorage.getItem('user_user-name');
-                if (savedName) setUserName(savedName);
-                const savedLogo = localStorage.getItem('user_custom-logo');
-                if (savedLogo) setLogo(savedLogo);
-
-                let currentBoards = [];
+            // Load and Sync
+            const loadData = () => {
                 const savedBoards = localStorage.getItem('shared_board-states');
+                const savedHours = localStorage.getItem('user_auto-release-cfg');
                 
-                if (savedBoards) {
-                    currentBoards = JSON.parse(savedBoards);
-                    // FORCE UPDATE NAMES if they don't match the Master/Slave requirement
-                    currentBoards = currentBoards.map(b => {
-                        const def = boardDefinitions.find(d => d.id === b.id);
-                        return def ? { ...b, name: def.name } : b;
-                    });
-                } else {
-                    currentBoards = boardDefinitions.map(def => ({ 
-                        ...def, locked: false, lockedBy: null, lockedAt: null, inMaintenance: false 
-                    }));
-                }
+                if (savedHours) setAutoReleaseHours(Number(savedHours));
+                
+                let currentStates = savedBoards ? JSON.parse(savedBoards) : [];
+                
+                // Feature 2: Auto-Release Logic
+                const now = new Date().getTime();
+                const updatedStates = BOARD_DEFS.map(def => {
+                    const existing = currentStates.find(b => b.id === def.id);
+                    if (!existing) return { ...def, locked: false, inMaintenance: false, note: '' };
+                    
+                    // Check if board needs auto-release
+                    if (existing.locked && existing.lockedAt) {
+                        const lockedTime = new Date(existing.lockedAt).getTime();
+                        const hoursElapsed = (now - lockedTime) / (1000 * 60 * 60);
+                        if (hoursElapsed >= autoReleaseHours) {
+                            return { ...def, locked: false, lockedBy: null, lockedAt: null, inMaintenance: false, note: '' };
+                        }
+                    }
+                    
+                    // Force Name Sync (Master/Slave)
+                    return { ...existing, name: def.name };
+                });
 
-                setBoards(currentBoards);
-                localStorage.setItem('shared_board-states', JSON.stringify(currentBoards));
-                setLoading(false);
-            }, []);
+                setBoards(updatedStates);
+                localStorage.setItem('shared_board-states', JSON.stringify(updatedStates));
+                setLastUpdated(new Date());
+            };
+
+            // Feature 4: Heartbeat / Auto-Refresh every 30 seconds
+            useEffect(() => {
+                const savedUser = localStorage.getItem('user_user-name');
+                if (savedUser && VALID_USERS.includes(savedUser)) setUserName(savedUser);
+
+                loadData();
+                const interval = setInterval(loadData, 30000); 
+                return () => clearInterval(interval);
+            }, [autoReleaseHours]);
 
             const updateStorage = (newBoards) => {
                 setBoards(newBoards);
@@ -88,164 +80,180 @@
             };
 
             const toggleLock = (id) => {
-                if (!userName) { setShowNameDialog(true); return; }
+                if (!userName) { setShowLogin(true); return; }
                 const updated = boards.map(b => {
                     if (b.id === id) {
                         if (b.inMaintenance) return b;
-                        if (b.locked && b.lockedBy !== userName) { alert(`Locked by ${b.lockedBy}`); return b; }
-                        return { ...b, locked: !b.locked, lockedBy: !b.locked ? userName : null, lockedAt: !b.locked ? new Date().toISOString() : null };
+                        if (b.locked && b.lockedBy !== userName) {
+                            alert(`Resource held by ${b.lockedBy}`);
+                            return b;
+                        }
+                        return { 
+                            ...b, 
+                            locked: !b.locked, 
+                            lockedBy: !b.locked ? userName : null, 
+                            lockedAt: !b.locked ? new Date().toISOString() : null 
+                        };
                     }
                     return b;
                 });
                 updateStorage(updated);
             };
 
+            // Feature 3: Maintenance Notes
             const toggleMaintenance = (id) => {
-                const updated = boards.map(b => {
-                    if (b.id === id) {
-                        const newState = !b.inMaintenance;
-                        return { ...b, inMaintenance: newState, locked: false, lockedBy: null };
+                const board = boards.find(b => b.id === id);
+                if (board.inMaintenance) {
+                    updateStorage(boards.map(b => b.id === id ? { ...b, inMaintenance: false, note: '' } : b));
+                } else {
+                    const note = prompt("Reason for Maintenance (e.g., Firmware Update):");
+                    if (note !== null) {
+                        updateStorage(boards.map(b => b.id === id ? { 
+                            ...b, inMaintenance: true, note: note, locked: false, lockedBy: null 
+                        } : b));
                     }
-                    return b;
-                });
-                updateStorage(updated);
+                }
             };
 
-            if (loading) return null;
+            const handleAutoReleaseChange = (e) => {
+                const val = e.target.value;
+                setAutoReleaseHours(val);
+                localStorage.setItem('user_auto-release-cfg', val);
+            };
 
             return (
-                <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8">
+                <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
                     <div className="max-w-6xl mx-auto">
+                        
                         {/* Header */}
-                        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-6 flex flex-col md:flex-row items-center gap-6 border border-white/10">
-                            <div onClick={() => fileInputRef.current.click()} className="cursor-pointer bg-white p-4 rounded-lg shadow-lg min-w-[180px] h-16 flex items-center justify-center relative group overflow-hidden">
-                                {logo ? <img src={logo} className="h-full object-contain"/> : <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">Logo</span>}
-                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                    <span className="text-[10px] text-white font-bold">CHANGE</span>
+                        <header className="flex flex-col md:flex-row justify-between items-center mb-8 bg-slate-900/50 p-6 rounded-3xl border border-white/5 backdrop-blur-md">
+                            <div className="mb-4 md:mb-0">
+                                <h1 className="text-2xl font-black tracking-tight text-white uppercase">SATCOM Board Manager</h1>
+                                <p className="text-xs text-slate-500 font-mono">System Heartbeat: {lastUpdated.toLocaleTimeString()}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-4 items-center">
+                                {/* Auto-Release Config */}
+                                <div className="bg-white/5 px-4 py-2 rounded-xl border border-white/10 flex items-center gap-3">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase">Auto-Release:</span>
+                                    <select 
+                                        value={autoReleaseHours} 
+                                        onChange={handleAutoReleaseChange}
+                                        className="bg-transparent text-blue-400 font-bold outline-none cursor-pointer"
+                                    >
+                                        <option value="1">1h</option>
+                                        <option value="4">4h</option>
+                                        <option value="8">8h</option>
+                                        <option value="12">12h</option>
+                                        <option value="24">24h</option>
+                                    </select>
                                 </div>
-                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
-                                    const reader = new FileReader();
-                                    reader.onloadend = () => { setLogo(reader.result); localStorage.setItem('user_custom-logo', reader.result); };
-                                    reader.readAsDataURL(e.target.files[0]);
-                                }}/>
+
+                                {/* Whitelist User Toggle */}
+                                <button 
+                                    onClick={() => setShowLogin(true)}
+                                    className="flex items-center gap-3 bg-blue-600 hover:bg-blue-500 px-5 py-2 rounded-xl text-white font-bold transition-all shadow-lg shadow-blue-900/20"
+                                >
+                                    <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+                                    {userName || "Identify User"}
+                                </button>
                             </div>
-                            <div className="flex-1 text-center md:text-left text-white">
-                                <h1 className="text-4xl font-bold tracking-tight">SATCOM/F-EMIDS Board Manager</h1>
-                                <p className="text-blue-200 mt-1 opacity-80">Lock and manage shared development boards</p>
-                            </div>
-                            <div className="flex items-center gap-3 bg-white/10 px-5 py-3 rounded-xl text-white border border-white/10 shadow-inner">
-                                <User size={18}/> <span className="font-semibold">{userName || 'Guest'}</span>
-                                <button onClick={() => setShowNameDialog(true)} className="text-[10px] uppercase tracking-wider font-bold bg-white/20 hover:bg-white/30 px-2 py-1 rounded transition-colors">Change</button>
-                            </div>
-                        </div>
+                        </header>
 
                         {/* Boards Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
                             {boards.map(board => (
-                                <div key={board.id} className={`rounded-2xl p-6 border-2 transition-all duration-300 shadow-xl ${
-                                    board.inMaintenance ? 'bg-orange-500/10 border-orange-500/40' : 
-                                    board.locked ? 'bg-red-500/10 border-red-500/40' : 'bg-green-500/10 border-green-500/40'
+                                <div key={board.id} className={`relative overflow-hidden rounded-3xl border-2 p-6 transition-all duration-500 ${
+                                    board.inMaintenance ? 'bg-orange-500/5 border-orange-500/30' : 
+                                    board.locked ? 'bg-red-500/5 border-red-500/30' : 'bg-emerald-500/5 border-emerald-500/30'
                                 }`}>
-                                    <div className="flex justify-between items-start mb-4">
+                                    <div className="flex justify-between items-start mb-6">
                                         <div>
-                                            <h3 className="text-xl font-bold text-white tracking-wide">{board.name}</h3>
-                                            <span className="text-[10px] uppercase font-bold tracking-widest text-blue-300/60">{board.type}</span>
+                                            <h3 className="text-xl font-bold text-white">{board.name}</h3>
+                                            <span className="text-[10px] font-black text-slate-500 tracking-widest uppercase">{board.type}</span>
                                         </div>
-                                        {board.inMaintenance ? <Wrench className="text-orange-400" /> : 
-                                         board.locked ? <Lock className="text-red-400"/> : <Unlock className="text-green-400"/>}
                                     </div>
 
-                                    <div className="mb-6 h-14 flex flex-col justify-center">
+                                    <div className="h-20 flex flex-col justify-center">
                                         {board.inMaintenance ? (
-                                            <div className="flex items-center gap-2 text-orange-400 font-bold text-xs uppercase tracking-tighter">
-                                                <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div>
-                                                Under Maintenance
+                                            <div className="space-y-1">
+                                                <span className="text-orange-500 font-bold text-[10px] uppercase tracking-widest">In Maintenance</span>
+                                                <p className="text-sm italic text-slate-300">"{board.note}"</p>
                                             </div>
                                         ) : board.locked ? (
-                                            <div className="text-white space-y-1">
-                                                <div className="flex items-center gap-2 text-sm font-medium"><User size={14}/> {board.lockedBy}</div>
-                                                <div className="text-[10px] text-blue-200/60 uppercase ml-6">{new Date(board.lockedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                            <div className="space-y-1">
+                                                <span className="text-red-500 font-bold text-[10px] uppercase tracking-widest">Occupied</span>
+                                                <p className="text-lg font-bold text-white">{board.lockedBy}</p>
+                                                <p className="text-[10px] text-slate-500">Since {new Date(board.lockedAt).toLocaleTimeString()}</p>
                                             </div>
-                                        ) : <span className="text-green-400 text-sm font-bold tracking-wide">● Available</span>}
+                                        ) : (
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                                <span className="text-emerald-500 font-bold text-xs uppercase tracking-widest">Ready</span>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <div className="space-y-3">
+                                    <div className="mt-6 space-y-3">
                                         <button 
                                             disabled={board.inMaintenance || (board.locked && board.lockedBy !== userName)}
-                                            onClick={() => toggleLock(board.id)} 
-                                            className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transition-all active:scale-95 ${
-                                                board.inMaintenance ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none' : 
-                                                board.locked ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                                            onClick={() => toggleLock(board.id)}
+                                            className={`w-full py-4 rounded-2xl font-bold transition-all active:scale-95 shadow-xl ${
+                                                board.inMaintenance ? 'bg-slate-800 text-slate-600 cursor-not-allowed' :
+                                                board.locked ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                             }`}
                                         >
-                                            {board.locked ? 'Release Lock' : 'Lock Board'}
+                                            {board.locked ? 'Release Resource' : 'Claim Board'}
                                         </button>
-
                                         <button 
                                             onClick={() => toggleMaintenance(board.id)}
-                                            className={`w-full py-2 text-[10px] uppercase font-black tracking-widest border rounded-lg transition-all ${
-                                                board.inMaintenance 
-                                                ? 'bg-orange-500/20 border-orange-500/50 text-orange-400 hover:bg-orange-500/30' 
-                                                : 'border-white/10 text-white/30 hover:text-white hover:border-white/30'
-                                            }`}
+                                            className="w-full py-2 text-[10px] font-black uppercase tracking-tighter text-slate-500 hover:text-orange-400 transition-colors"
                                         >
-                                            {board.inMaintenance ? 'End Maintenance' : 'Set Maintenance'}
+                                            {board.inMaintenance ? 'End Maintenance' : 'Flag Maintenance'}
                                         </button>
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        {/* Footer / Instructions */}
-                        <div className="bg-white/5 backdrop-blur-md rounded-2xl p-8 border border-white/5">
-                            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                                <span className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-xs">?</span>
-                                How to Use
-                            </h2>
-                            <div className="grid md:grid-cols-2 gap-8 text-sm text-blue-100/70 leading-relaxed">
-                                <ul className="space-y-3">
-                                    <li className="flex gap-2">
-                                        <span className="text-blue-400 font-bold">01.</span>
-                                        <span>Set your <strong>Team Member Name</strong> in the top right.</span>
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="text-blue-400 font-bold">02.</span>
-                                        <span>Click <strong>Lock Board</strong> to claim a resource.</span>
-                                    </li>
+                        {/* Footer Instructions */}
+                        <div className="bg-slate-900/30 p-8 rounded-3xl border border-white/5 text-sm text-slate-400">
+                            <h2 className="text-white font-bold mb-4 uppercase tracking-widest">Protocol</h2>
+                            <div className="grid md:grid-cols-2 gap-8">
+                                <ul className="space-y-2">
+                                    <li>• Select your ID from the <strong>Whitelist</strong> to interact.</li>
+                                    <li>• Boards auto-release after <strong>{autoReleaseHours} hours</strong> of inactivity.</li>
                                 </ul>
-                                <ul className="space-y-3">
-                                    <li className="flex gap-2">
-                                        <span className="text-orange-400 font-bold">03.</span>
-                                        <span>Use <strong>Maintenance Mode</strong> for updates or physical disconnects.</span>
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="text-blue-400 font-bold">04.</span>
-                                        <span>Always <strong>Release Lock</strong> when finished.</span>
-                                    </li>
+                                <ul className="space-y-2">
+                                    <li>• Flag <strong>Maintenance</strong> for physical hardware changes.</li>
+                                    <li>• This dashboard refreshes every 30s for team sync.</li>
                                 </ul>
                             </div>
                         </div>
                     </div>
 
-                    {showNameDialog && (
-                        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-50 p-6">
-                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full">
-                                <h2 className="text-3xl font-black text-slate-900 mb-2">Identify</h2>
-                                <input autoFocus className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl mb-4 outline-none" 
-                                    placeholder="Username" 
-                                    onKeyPress={(e) => {
-                                        if(e.key === 'Enter' && e.target.value.trim()) { 
-                                            setUserName(e.target.value.trim()); 
-                                            localStorage.setItem('user_user-name', e.target.value.trim()); 
-                                            setShowNameDialog(false); 
-                                        }
-                                    }}/>
-                                <button onClick={(e) => {
-                                    const val = e.target.previousSibling.value.trim();
-                                    if(val) { setUserName(val); localStorage.setItem('user_user-name', val); setShowNameDialog(false); }
-                                }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold">
-                                    Continue
-                                </button>
+                    {/* Whitelist Login Dialog */}
+                    {showLogin && (
+                        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center z-50 p-4">
+                            <div className="bg-slate-900 border border-white/10 p-8 rounded-[2rem] max-w-sm w-full shadow-2xl">
+                                <h2 className="text-2xl font-black text-white mb-2 uppercase italic">Team Identity</h2>
+                                <p className="text-slate-500 text-xs mb-6">Select your authorized username from the registry.</p>
+                                <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                                    {VALID_USERS.map(user => (
+                                        <button 
+                                            key={user} 
+                                            onClick={() => {
+                                                setUserName(user);
+                                                localStorage.setItem('user_user-name', user);
+                                                setShowLogin(false);
+                                            }}
+                                            className="w-full p-4 bg-white/5 hover:bg-blue-600 rounded-2xl text-left font-bold transition-all hover:translate-x-1"
+                                        >
+                                            {user}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button onClick={() => setShowLogin(false)} className="mt-6 w-full py-2 text-slate-500 text-[10px] font-bold uppercase hover:text-white">Cancel</button>
                             </div>
                         </div>
                     )}
@@ -255,5 +263,9 @@
 
         ReactDOM.render(<BoardManager />, document.getElementById('root'));
     </script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
 </body>
 </html>
